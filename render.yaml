@@ -1,0 +1,49 @@
+# Reference configuration. Configure an existing connected service instead of
+# provisioning duplicates. Applying this paid plan requires operator approval.
+services:
+  - type: web
+    name: sarcasm-agent
+    runtime: python
+    plan: starter
+    numInstances: 1
+    autoDeployTrigger: "off"
+    buildCommand: uv sync --locked --no-dev
+    startCommand: .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --no-access-log
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.12"
+      - key: UV_VERSION
+        value: "0.13.7"
+      - key: APP_ENV
+        value: production
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_BASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SIGNING_KEY
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: GLOBAL_WINDOW_LIMIT
+        sync: false
+      - key: GLOBAL_DAY_LIMIT
+        sync: false
+      - key: SESSION_WINDOW_LIMIT
+        sync: false
+      - key: HTTP_WINDOW_LIMIT
+        sync: false
+      - key: HTTP_MAX_INFLIGHT
+        sync: false
+      - key: AUDIT_TIMEOUT_SECONDS
+        sync: false
+      - key: RETENTION_DAYS
+        sync: false
+      - key: SESSION_TTL_SECONDS
+        sync: false

@@ -1,0 +1,39 @@
+[project]
+name = "sarcasm-agent"
+version = "0.1.0"
+description = "An audited, observable audience sarcasm detector."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "alembic>=1.16,<2",
+  "fastapi>=0.115,<1",
+  "itsdangerous>=2.2,<3",
+  "jinja2>=3.1,<4",
+  "langfuse>=3,<4",
+  "openai>=2,<3",
+  "opentelemetry-sdk>=1.38,<2",
+  "psycopg[binary]>=3.2,<4",
+  "pydantic-settings>=2.8,<3",
+  "segno>=1.6,<2",
+  "sqlalchemy[asyncio]>=2.0,<3",
+  "uvicorn>=0.34,<1",
+]
+
+[dependency-groups]
+dev = ["httpx>=0.28,<1", "pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.11,<1"]
+eval = ["scikit-learn>=1.6,<2"]
+local-postgres = ["pgserver==0.1.4"]
+browser = ["playwright>=1.55,<2"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = ["postgres: requires an explicitly isolated TEST_DATABASE_URL"]

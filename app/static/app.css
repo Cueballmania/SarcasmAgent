@@ -1,0 +1,29 @@
+:root { color-scheme: light; font-family: system-ui, sans-serif; color: #152638; background: #f6f3ec; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { width: min(100% - 2rem, 42rem); margin: 3rem auto; }
+h1 { font-size: clamp(2.5rem, 7vw, 4rem); line-height: 1.1; margin: .5rem 0 1rem; letter-spacing: -.04em; }
+h2 { font-size: 1.2rem; }
+p { line-height: 1.6; }
+.eyebrow { color: #384f63; text-transform: uppercase; letter-spacing: .12em; font-size: .8rem; font-weight: 700; }
+.intro { font-size: 1.15rem; }
+form { margin-top: 2rem; padding: 1.5rem; background: white; border: 1px solid #bcc5ce; border-radius: 1rem; }
+label { display: block; font-weight: 700; margin-bottom: .5rem; }
+textarea { display: block; width: 100%; resize: vertical; font: inherit; line-height: 1.5; padding: .8rem; border: 1px solid #526579; border-radius: .4rem; }
+button { min-height: 48px; padding: .8rem 1.2rem; border: 0; border-radius: .4rem; background: #163f65; color: white; font: inherit; font-weight: 700; cursor: pointer; }
+button:disabled { background: #405972; cursor: wait; }
+:focus-visible { outline: 3px solid #825900; outline-offset: 4px; }
+textarea[aria-invalid="true"] { border: 2px solid #9a2531; }
+#result { font-size: 1.5rem; font-weight: 700; }
+#error { color: #9a2531; font-weight: 600; }
+.muted, #message-help { color: #405366; font-size: .9rem; }
+.notice { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #bcc5ce; }
+a { color: #123f68; text-underline-offset: .2em; overflow-wrap: anywhere; }
+footer { padding: 1rem 0; }
+.presenter { text-align: center; }
+.qr { display: block; width: min(100%, 28rem); height: auto; margin: 2rem auto; background: white; }
+.destination { font-size: 1.2rem; }
+nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 1rem; }
+nav a { padding: .8rem; min-height: 48px; }
+@media (max-width: 400px) { main { margin-top: 1.5rem; } form { padding: 1rem; } }
+@media (forced-colors: active) { button { border: 1px solid ButtonText; } }

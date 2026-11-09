@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sarcasm detector</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">A little irony. A little AI.</p>
+  <h1>Was that sarcasm?</h1>
+  <p class="intro">Send a message and see what the classifier thinks.</p>
+  <form id="classify-form" method="post" action="/api/classify"
+        data-labels='{{ labels | tojson }}'>
+    <label for="message">Your message</label>
+    <textarea id="message" name="message" rows="5" maxlength="2000" required
+              aria-describedby="message-help" placeholder="Oh great, another meeting."></textarea>
+    <p id="message-help">Up to 2,000 characters. English-first; context matters.</p>
+    <button id="submit" type="submit">Detect sarcasm</button>
+    <p id="result" role="status" aria-atomic="true"></p>
+    <p id="error" role="alert" aria-atomic="true"></p>
+    <p id="request-id" class="muted"></p>
+  </form>
+  <noscript><p>JavaScript is required to submit a JSON message. Enable it to use this form.</p></noscript>
+  <section aria-labelledby="about-heading" class="notice">
+    <h2 id="about-heading">A demonstration, not a verdict</h2>
+    <p>Sarcasm is subjective. The classifier can be wrong or return Unknown when context,
+       language, or conflicting cues make the meaning unclear.</p>
+    <p>Your message is processed by OpenAI. This app stores request metadata for
+       {{ retention_days }} days, not your message text. Langfuse receives minimized trace
+       metadata. External providers may retain processing data under their own policies.
+       Please do not submit personal or confidential information.</p>
+  </section>
+  <footer><a href="/presenter">Presenter QR and downloads</a></footer>
+</main>
+</body>
+</html>

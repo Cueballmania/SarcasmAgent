@@ -15,8 +15,33 @@ SAFE_ATTRIBUTES = {
     "langfuse.observation.cost_details",
     "langfuse.environment",
     "langfuse.release",
-    "langfuse.observation.version",
+    "langfuse.version",
     "langfuse.observation.level",
+    "langfuse.experiment.id",
+    "langfuse.experiment.name",
+    "langfuse.experiment.item.id",
+    "langfuse.experiment.item.root_observation_id",
+}
+
+SAFE_METADATA = {
+    "request_id",
+    "prompt_revision",
+    "schema_revision",
+    "environment",
+    "deploy_revision",
+    "model",
+    "input_length",
+    "label",
+    "outcome",
+    "error_code",
+    "elapsed_ms",
+    "input_tokens",
+    "output_tokens",
+    "run_name",
+    "split",
+    "dataset_version",
+    "case_id",
+    "expected_label",
 }
 
 
@@ -30,13 +55,24 @@ def sanitized_span(span: ReadableSpan) -> ReadableSpan:
     attributes = {
         key: value
         for key, value in (span.attributes or {}).items()
-        if key in SAFE_ATTRIBUTES or key.startswith("sarcasm.")
+        if key in SAFE_ATTRIBUTES
+        or (key.startswith("sarcasm.") and key.removeprefix("sarcasm.") in SAFE_METADATA)
     }
+    # Project approved fields after SDK masking, never arbitrary SDK metadata.
+    for key, value in list(attributes.items()):
+        if key.startswith("sarcasm."):
+            field = key.removeprefix("sarcasm.")
+            attributes[f"langfuse.observation.metadata.{field}"] = value
+            attributes[f"langfuse.trace.metadata.{field}"] = value
+    outcome = attributes.get("sarcasm.outcome")
+    if outcome in {"error", "abstained"}:
+        attributes["langfuse.observation.level"] = "ERROR" if outcome == "error" else "WARNING"
     resource = Resource(
         {
             key: value
             for key, value in span.resource.attributes.items()
-            if key.startswith("telemetry.sdk.") or key in {"service.name"}
+            if key.startswith("telemetry.sdk.")
+            or key in {"service.name", "service.version", "deployment.environment"}
         }
     )
     return ReadableSpan(
@@ -78,6 +114,17 @@ class PrivacyProcessor(SpanProcessor):
 
 class PrivacyTracerProvider(TracerProvider):
     """Wrap every attached processor through the supported public extension point."""
+
+    def __init__(self, *, environment: str = "local", release: str = "local") -> None:
+        super().__init__(
+            resource=Resource.create(
+                {
+                    "service.name": "sarcasm-agent",
+                    "service.version": release,
+                    "deployment.environment": environment,
+                }
+            )
+        )
 
     def add_span_processor(self, span_processor: SpanProcessor) -> None:
         """Apply the same export policy to Langfuse's automatically installed processor."""

@@ -8,6 +8,7 @@ import pytest
 from langfuse import Langfuse
 from langfuse.openai import AsyncOpenAI
 
+from app.classifier import Classifier
 from app.contracts import MODEL, PROMPT_REVISION, SCHEMA_REVISION, Label
 from evals.contracts import Budget, Case, Dataset, RunConfig, Thresholds, file_hash
 from evals.metrics import passes, summarize
@@ -188,11 +189,15 @@ def test_release_rejects_stale_revision_source_dataset_and_config(tmp_path) -> N
             )
 
 
-def test_actual_experiment_sdk_is_bounded_and_offline(monkeypatch, provider_factory) -> None:
+@pytest.mark.parametrize("failure_mode", ["none", "provider", "isolated"])
+def test_actual_experiment_sdk_is_bounded_and_offline(
+    monkeypatch, provider_factory, failure_mode
+) -> None:
     """Synthetic reviewed-flag fixtures exercise the SDK, not a real gold evaluation."""
-    _, spans, _ = provider_factory
+    _, spans, _, _ = provider_factory
     labels = list(Label)
     calls = []
+    scores = []
     cases = [
         Case(
             case_id=f"c{i}",
@@ -202,6 +207,7 @@ def test_actual_experiment_sdk_is_bounded_and_offline(monkeypatch, provider_fact
             split="holdout",
             provenance="synthetic",
             reviewed=True,
+            tags=["all-cases", f"class-{i}"],
         )
         for i, label in enumerate(labels)
     ]
@@ -219,13 +225,17 @@ def test_actual_experiment_sdk_is_bounded_and_offline(monkeypatch, provider_fact
     )
 
     def tracer_factory(**kwargs):
+        def transport(request):
+            scores.extend(
+                event["body"]
+                for event in json.loads(request.content)["batch"]
+                if event["type"] == "score-create"
+            )
+            return httpx.Response(200, json={"successes": [], "errors": []})
+
         return Langfuse(
             **kwargs,
-            httpx_client=httpx.Client(
-                transport=httpx.MockTransport(
-                    lambda request: httpx.Response(200, json={"successes": [], "errors": []}),
-                )
-            ),
+            httpx_client=httpx.Client(transport=httpx.MockTransport(transport)),
         )
 
     def api_factory(**kwargs):
@@ -233,6 +243,10 @@ def test_actual_experiment_sdk_is_bounded_and_offline(monkeypatch, provider_fact
             payload = json.loads(request.content)
             calls.append(payload)
             index = int(payload["input"][0]["content"][-1])
+            if failure_mode == "provider" and index == 1:
+                return httpx.Response(
+                    500, json={"error": {"message": "PRIVATE_EVAL_MARKER", "type": "server_error"}}
+                )
             return httpx.Response(200, json=response_body(label=labels[index].value))
 
         return AsyncOpenAI(
@@ -244,8 +258,70 @@ def test_actual_experiment_sdk_is_bounded_and_offline(monkeypatch, provider_fact
 
     monkeypatch.setattr("evals.run.Langfuse", tracer_factory)
     monkeypatch.setattr("evals.run.AsyncOpenAI", api_factory)
+    if failure_mode == "isolated":
+        original_classify = Classifier.classify
+
+        async def isolated_failure(self, message, *args, **kwargs):
+            result = await original_classify(self, message, *args, **kwargs)
+            if message == "fixture1":
+                raise RuntimeError("PRIVATE_EVAL_MARKER")
+            return result
+
+        monkeypatch.setattr(Classifier, "classify", isolated_failure)
     limits = config(thresholds=thresholds().model_copy(update={"p95_ms": 10000}))
     report = experiment(dataset, limits, split="holdout", settings=cfg)
-    assert report["metrics"]["count"] == 3 and report["pass"] is True
+    assert report["metrics"]["count"] == 3 and report["pass"] is (failure_mode == "none")
     assert len(calls) == 3 and report["reserved_cost_usd"] <= limits.max_cost_usd
     assert "fixture0" not in repr([dict(span.attributes or {}) for span in spans])
+    assert "PRIVATE_EVAL_MARKER" not in repr(scores) + repr(report) + repr(spans)
+    assert "fixture0" not in json.dumps(report) + repr(scores)
+    assert report["run_name"].startswith("sarcasm-" + limits.revision[:12])
+    summary = next(span for span in spans if span.name == "evaluate.sarcasm")
+    assert report["summary_trace_id"] == format(summary.context.trace_id, "032x")
+    summary_scores = {
+        score["name"]: score["value"]
+        for score in scores
+        if score["traceId"] == report["summary_trace_id"]
+    }
+    assert summary_scores["macro_f1"] == report["metrics"]["macro_f1"]
+    assert summary_scores["unknown_recall"] == 1
+    assert summary_scores["missing_cost_count"] == 3
+    assert "available_cost_usd" not in summary_scores
+    assert summary_scores["release_gate_passed"] == int(failure_mode == "none")
+    case_traces = {item["trace_id"] for item in report["cases"] if item["trace_id"]}
+    assert len(case_traces) == (2 if failure_mode == "isolated" else 3)
+    assert report["summary_trace_id"] not in case_traces
+    experiment_roots = [span for span in spans if span.name == "experiment-item-run"]
+    assert len(experiment_roots) == 3
+    assert all(
+        span.attributes["langfuse.experiment.name"] == report["run_name"]
+        for span in experiment_roots
+    )
+    assert all(
+        span.attributes["langfuse.observation.metadata.expected_label"] in labels
+        for span in experiment_roots
+    )
+    assert report["slices"]["all-cases"]["macro_f1"] == report["metrics"]["macro_f1"]
+    for item in report["cases"]:
+        if not item["trace_id"]:
+            assert failure_mode == "isolated" and item["case_id"] == "c1"
+            assert item["failure"] == "experiment_case_missing"
+            continue
+        case_scores = {
+            score["name"]: score["value"]
+            for score in scores
+            if score["traceId"] == item["trace_id"]
+        }
+        assert case_scores["exact_label"] == int(item["failure"] is None)
+        assert case_scores["eval_response_contract"] == int(item["failure"] is None)
+        assert case_scores["abstention_correct"] == int(item["failure"] is None)
+        assert "latency_within_target" in case_scores
+        assert item["cost_usd"] is None
+    if failure_mode != "none":
+        code = "provider_error" if failure_mode == "provider" else "experiment_case_missing"
+        assert report["failure_counts"] == {code: 1}
+        assert report["cases"][1]["predicted"] is None
+        assert report["cases"][1]["input_tokens"] is None
+    else:
+        assert report["failure_counts"] == {}
+        assert all(item["input_tokens"] == 8 for item in report["cases"])

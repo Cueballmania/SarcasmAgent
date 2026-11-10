@@ -177,7 +177,7 @@ async def test_model_slots_reject_busy_without_provider_or_quota_reservation() -
 async def test_synthetic_marker_sweep_db_logs_actual_exports(
     db: Database, provider_factory, caplog
 ) -> None:
-    make, spans, calls = provider_factory
+    make, spans, calls, scores = provider_factory
     detector = make()
     async with client_for(store=db, detector=detector) as (client, store, detector, app):
         response = await client.post("/api/classify", json={"message": MARKER})
@@ -192,3 +192,5 @@ async def test_synthetic_marker_sweep_db_logs_actual_exports(
             assert MARKER not in repr(values)
         assert MARKER not in caplog.text
         assert MARKER not in repr([dict(span.attributes or {}) for span in spans])
+        assert MARKER not in repr(scores)
+        assert all(score["traceId"] == row.trace_id for score in scores)

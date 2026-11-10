@@ -11,11 +11,12 @@ from uuid import uuid4
 
 from langfuse import Evaluation, Langfuse
 from langfuse.openai import AsyncOpenAI
+from opentelemetry import trace
 from pydantic import ValidationError
 
 from app.classifier import Classifier
 from app.config import Settings
-from app.contracts import MODEL, PROMPT_REVISION, SCHEMA_REVISION, AppError
+from app.contracts import MODEL, PROMPT_REVISION, SCHEMA_REVISION, AppError, Label
 from app.tracing import PrivacyTracerProvider, configure_logging, mask_data
 from evals.contracts import Budget, Dataset, RunConfig, file_hash
 from evals.metrics import passes, summarize
@@ -55,7 +56,9 @@ def experiment(
         (settings.openai_api_key, settings.langfuse_public_key, settings.langfuse_secret_key)
     ):
         raise ValueError("Live evaluation requires configured provider/trace credentials")
-    settings = settings.model_copy(update={"max_output_tokens": config.max_output_tokens})
+    settings = settings.model_copy(
+        update={"max_output_tokens": config.max_output_tokens, "deploy_revision": config.revision}
+    )
     key = settings.langfuse_public_key.get_secret_value()
     tracer = Langfuse(
         public_key=key,
@@ -65,9 +68,21 @@ def experiment(
         release=config.revision,
         mask=mask_data,
         timeout=2,
-        tracer_provider=PrivacyTracerProvider(),
+        tracer_provider=PrivacyTracerProvider(
+            environment=settings.app_env, release=config.revision
+        ),
     )
     results: dict[str, dict] = {}
+    run_name = f"sarcasm-{config.revision[:12]}-{uuid4().hex[:8]}"
+    run_metadata = {
+        "sarcasm.run_name": run_name,
+        "sarcasm.split": split,
+        "sarcasm.dataset_version": dataset.version,
+        "sarcasm.deploy_revision": config.revision,
+        "sarcasm.prompt_revision": PROMPT_REVISION,
+        "sarcasm.schema_revision": SCHEMA_REVISION,
+        "sarcasm.model": MODEL,
+    }
 
     async def task(*, item: dict) -> str | None:
         started = monotonic()
@@ -75,6 +90,15 @@ def experiment(
         output = None
         cost = None
         failure = None
+        input_tokens = output_tokens = None
+        trace_id = tracer.get_current_trace_id()
+        trace.get_current_span().set_attributes(
+            {
+                **run_metadata,
+                "sarcasm.case_id": case_id,
+                "sarcasm.expected_label": item["expected_output"],
+            }
+        )
         try:
             async with AsyncOpenAI(
                 api_key=settings.openai_api_key.get_secret_value(),
@@ -90,19 +114,52 @@ def experiment(
                     )
                 output = result.label.value
                 cost = result.cost_usd
+                input_tokens, output_tokens = result.input_tokens, result.output_tokens
+                trace_id = result.trace_id or trace_id
         except (AppError, TimeoutError) as error:
             failure = error.code if isinstance(error, AppError) else "request_timeout"
             logging.warning("evaluation_case_failed code=%s", failure)
+        current_span = trace.get_current_span()
+        current_span.set_attribute(
+            "sarcasm.outcome",
+            "error" if failure else "abstained" if output == Label.UNKNOWN else "success",
+        )
+        if failure:
+            current_span.set_attribute("sarcasm.error_code", failure)
+        if output is not None:
+            current_span.set_attribute("sarcasm.label", output)
         results[case_id] = {
             "output": output,
             "elapsed_ms": (monotonic() - started) * 1000,
             "cost": cost,
             "failure": failure,
+            "trace_id": trace_id,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
         }
         return output
 
-    def exact(*, output: str | None, expected_output: str, **kwargs) -> Evaluation:
-        return Evaluation(name="exact_label", value=int(output == expected_output))
+    def evaluate_case(
+        *, output: str | None, expected_output: str, metadata: dict, **kwargs
+    ) -> list[Evaluation]:
+        observed = results[metadata["case_id"]]
+        valid = output in {label.value for label in Label}
+        return [
+            Evaluation(name="exact_label", value=int(output == expected_output)),
+            Evaluation(name="eval_response_contract", value=int(valid)),
+            Evaluation(
+                name="abstention_correct",
+                value=int(
+                    valid and (output == Label.UNKNOWN.value) == (expected_output == Label.UNKNOWN)
+                ),
+                comment="Correct abstention decision, not correctness of an answered label.",
+            ),
+            Evaluation(
+                name="latency_within_target",
+                value=int(observed["elapsed_ms"] <= config.thresholds.p95_ms),
+                comment="Per-case diagnostic; release latency gate uses run p95.",
+            ),
+        ]
 
     def observations() -> list[dict]:
         return [
@@ -113,6 +170,9 @@ def experiment(
                     "elapsed_ms": None,
                     "cost": None,
                     "failure": "experiment_case_missing",
+                    "trace_id": None,
+                    "input_tokens": None,
+                    "output_tokens": None,
                 },
             )
             for case in cases
@@ -120,10 +180,21 @@ def experiment(
 
     def aggregate(**kwargs) -> list[Evaluation]:
         metrics = measure()
-        return [
-            Evaluation(name=name, value=metrics[name])
-            for name in ("accuracy", "macro_f1", "coverage", "failure_rate", "unknown_rate")
+        scores = [
+            Evaluation(name=name, value=value)
+            for name, value in metrics.items()
+            if isinstance(value, (int, float))
         ]
+        for label, values in metrics["per_class"].items():
+            prefix = {
+                Label.SARCASM: "sarcasm",
+                Label.LITERAL: "literal",
+                Label.UNKNOWN: "unknown",
+            }[label]
+            scores.extend(
+                Evaluation(name=f"{prefix}_{name}", value=value) for name, value in values.items()
+            )
+        return scores
 
     def measure() -> dict[str, object]:
         observed = observations()
@@ -137,7 +208,7 @@ def experiment(
     try:
         tracer.run_experiment(
             name="sarcasm-" + split,
-            run_name=f"sarcasm-{config.revision[:12]}-{uuid4().hex[:8]}",
+            run_name=run_name,
             data=[
                 {
                     "input": case.message,
@@ -147,10 +218,16 @@ def experiment(
                 for case in cases
             ],
             task=task,
-            evaluators=[exact],
+            evaluators=[evaluate_case],
             run_evaluators=[aggregate],
             max_concurrency=config.max_concurrency,
-            metadata={"revision": config.revision, "dataset_version": dataset.version},
+            metadata={
+                "revision": config.revision,
+                "dataset_version": dataset.version,
+                "prompt_revision": PROMPT_REVISION,
+                "schema_revision": SCHEMA_REVISION,
+                "split": split,
+            },
         )
         # Missing SDK-isolated cases are explicit failures, not omitted observations.
         observed = observations()
@@ -159,11 +236,34 @@ def experiment(
         for tag in sorted({tag for case in cases for tag in case.tags}):
             indices = [i for i, case in enumerate(cases) if tag in case.tags]
             slices[tag] = {
-                "support": len(indices),
-                "accuracy": sum(cases[i].expected.value == observed[i]["output"] for i in indices)
-                / len(indices),
+                **summarize(
+                    [cases[i].expected.value for i in indices],
+                    [observed[i]["output"] for i in indices],
+                    elapsed_ms=[observed[i]["elapsed_ms"] for i in indices],
+                    costs=[observed[i]["cost"] for i in indices],
+                ),
                 "limitation": "No statistical sufficiency claim",
             }
+        # Local-data experiments have no dataset_run_id, so the v3 SDK does not
+        # persist run_evaluators. Give aggregate scores their own trace.
+        with tracer.start_as_current_observation(name="evaluate.sarcasm") as summary:
+            trace.get_current_span().set_attributes(run_metadata)
+            for score in aggregate():
+                tracer.create_score(
+                    trace_id=summary.trace_id,
+                    name=score.name,
+                    value=score.value,
+                    data_type="NUMERIC",
+                )
+            gate_passed = split == "holdout" and passes(metrics, config.thresholds)
+            tracer.create_score(
+                trace_id=summary.trace_id,
+                name="release_gate_passed",
+                value=int(gate_passed),
+                data_type="BOOLEAN",
+                comment="Pilot runs never authorize release; use the revision-bound CLI checker.",
+            )
+            summary_trace_id = summary.trace_id
         return {
             "fixture": False,
             "split": split,
@@ -175,8 +275,28 @@ def experiment(
             "source_hash": source_hash(),
             "metrics": metrics,
             "slices": slices,
+            "run_name": run_name,
+            "summary_trace_id": summary_trace_id,
+            "failure_counts": {
+                code: sum(item["failure"] == code for item in observed)
+                for code in sorted({item["failure"] for item in observed if item["failure"]})
+            },
+            "cases": [
+                {
+                    "case_id": case.case_id,
+                    "expected": case.expected.value,
+                    "predicted": item["output"],
+                    "trace_id": item["trace_id"],
+                    "failure": item["failure"],
+                    "elapsed_ms": item["elapsed_ms"],
+                    "input_tokens": item["input_tokens"],
+                    "output_tokens": item["output_tokens"],
+                    "cost_usd": item["cost"],
+                }
+                for case, item in zip(cases, observed, strict=True)
+            ],
             "reserved_cost_usd": budget.reserved_usd,
-            "pass": split == "holdout" and passes(metrics, config.thresholds),
+            "pass": gate_passed,
         }
     finally:
         tracer.shutdown()

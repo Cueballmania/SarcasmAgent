@@ -108,6 +108,12 @@ Uvicorn raw access logs are disabled; app diagnostics use safe codes/templates.
 Hosted proxies/providers may have their own logging/retention outside app control.
 SDK export filtering drops raw IO, exception events/status text and unapproved
 attributes. Recheck actual locked exports and privacy notice after SDK changes.
+The explicit application metadata allowlist is projected into native Langfuse
+metadata after masking; arbitrary `sarcasm.*` and SDK metadata are not admitted.
+Check the score ingestion channel too: it is separate from span masking.
+Runtime contract/abstention/latency scores describe model attempts, not HTTP audit
+commitment or ground-truth accuracy. For score names, linked experiment reports
+and a short prepared demo, see the [observability guide](observability-demo.md).
 
 ## Recovery and secret safety
 

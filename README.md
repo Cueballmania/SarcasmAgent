@@ -132,6 +132,14 @@ rate, latency and available cost. Unknown billing data remains unknown.
 Live runs require explicit `--live`, reviewed non-fixture data, authorization,
 request/concurrency/token/cost caps and thresholds; PR CI never makes paid calls.
 
+Langfuse now includes runtime contract/abstention/latency scores, validation spans,
+native request/release metadata and linked evaluation traces. Local experiments
+persist aggregate and per-class scores on an `evaluate.sarcasm` summary trace;
+reports include text-free case evidence and trace IDs for diagnosis.
+See the [five-minute observability and evaluation walkthrough](docs/observability-demo.md)
+for a prepared finished-product demo and the distinction between operational
+health, semantic correctness and release evidence.
+
 Rollout consumes both the exact revision's successful CI `checks` job and the
 current passing holdout checker. Render's skipped/neutral check acceptance is not
 sufficient quality evidence. After rollout, verify HTTPS, audit/trace linkage,

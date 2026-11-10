@@ -48,3 +48,19 @@ Do not use public audience messages to build gold under the metadata-only policy
 
 The operator owns review records, threshold approval and release authorization.
 Revisit the rubric when audience/language/model scope changes.
+
+## Reading the Langfuse evidence
+
+Item scores distinguish exact-label correctness, output-contract validity,
+correct abstention decisions and per-case latency targets. Runtime
+`response_contract`/`abstained` scores have no gold labels and are operational
+signals only. `Unknown` is valid abstention; provider failure is not.
+
+Local-data runs persist aggregate and per-class numeric scores on
+`evaluate.sarcasm`, identified by the report's `summary_trace_id` and `run_name`.
+Per-case report rows join to experiment traces without storing messages.
+Confusion matrices and complete per-tag metrics stay in the local report;
+missing cases stay in the denominator and missing costs stay null.
+`release_gate_passed` does not replace the source/revision/data/config-bound
+checker. For a concise presentation path, see the
+[observability walkthrough](../docs/observability-demo.md).

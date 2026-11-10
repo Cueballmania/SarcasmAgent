@@ -1,5 +1,6 @@
 """Actual locked Responses parsing and sanitized SDK export with fake transport."""
 
+import asyncio
 import json
 import logging
 from uuid import uuid4
@@ -10,6 +11,7 @@ from langfuse import Langfuse
 from langfuse.openai import AsyncOpenAI
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace.export import SpanExportResult
+from opentelemetry.trace import StatusCode
 
 from app.classifier import Classifier
 from app.contracts import AppError, Label
@@ -61,6 +63,7 @@ def provider_factory(monkeypatch: pytest.MonkeyPatch):
     """Capture actual export spans without a Langfuse network connection."""
     spans = []
     calls = []
+    scores = []
 
     def export(self, batch):
         spans.extend(batch)
@@ -73,14 +76,26 @@ def provider_factory(monkeypatch: pytest.MonkeyPatch):
         config = settings(
             openai_api_key="test-key", langfuse_public_key=key, langfuse_secret_key="sk-test"
         )
+
+        def score_transport(request):
+            scores.extend(
+                event["body"]
+                for event in json.loads(request.content)["batch"]
+                if event["type"] == "score-create"
+            )
+            return httpx.Response(200, json={"successes": [], "errors": []})
+
         tracer = Langfuse(
             public_key=key,
             secret_key="sk-test",
             base_url="https://example.test",
             mask=mask_data,
-            tracer_provider=PrivacyTracerProvider(),
+            tracer_provider=PrivacyTracerProvider(
+                environment=config.app_env, release=config.deploy_revision
+            ),
             flush_at=1,
             timeout=1,
+            httpx_client=httpx.Client(transport=httpx.MockTransport(score_transport)),
         )
 
         def transport(request):
@@ -96,14 +111,14 @@ def provider_factory(monkeypatch: pytest.MonkeyPatch):
         )
         return Classifier(config, api=api, tracer=tracer)
 
-    return make, spans, calls
+    return make, spans, calls, scores
 
 
 async def test_typed_parse_trace_and_export_privacy(provider_factory, caplog) -> None:
     configure_logging()
     logging.getLogger("openai").warning(MARKER)
     assert MARKER not in caplog.text and "telemetry_sdk_diagnostic" in caplog.text
-    make, spans, calls = provider_factory
+    make, spans, calls, scores = provider_factory
     classifier = make()
     try:
         result = await classifier.classify(
@@ -117,6 +132,20 @@ async def test_typed_parse_trace_and_export_privacy(provider_factory, caplog) ->
         assert calls[0]["store"] is False and calls[0]["reasoning"]["effort"] == "none"
         assert len(calls) == 1
         assert MARKER not in repr([dict(span.attributes) for span in spans])
+        assert MARKER not in repr(scores)
+        root = next(span for span in spans if span.name == "sarcasm-classification")
+        attrs = root.attributes
+        assert attrs["langfuse.observation.metadata.outcome"] == "success"
+        assert attrs["langfuse.trace.metadata.request_id"] == attrs["sarcasm.request_id"]
+        assert attrs["langfuse.observation.metadata.input_length"] == len(MARKER)
+        assert root.resource.attributes["service.name"] == "sarcasm-agent"
+        assert root.resource.attributes["deployment.environment"] == "test"
+        assert {score["name"]: score["value"] for score in scores} == {
+            "response_contract": 1,
+            "abstained": 0,
+            "latency_ms": pytest.approx(result.elapsed_ms, abs=20),
+        }
+        assert all(score["traceId"] == result.trace_id for score in scores)
         assert (
             len(
                 [
@@ -127,14 +156,16 @@ async def test_typed_parse_trace_and_export_privacy(provider_factory, caplog) ->
             )
             == 1
         )
-        assert len(spans) == 2
+        assert len(spans) == 3
+        assert all(span.parent.span_id == root.context.span_id for span in spans if span != root)
+        assert any(span.name == "validate.classification" for span in spans)
     finally:
         await classifier.close()
 
 
 @pytest.mark.parametrize("kind", ["refusal", "incomplete", "invalid_label", "provider", "timeout"])
 async def test_provider_failures_are_not_unknown(provider_factory, kind: str) -> None:
-    make, spans, calls = provider_factory
+    make, spans, calls, scores = provider_factory
     body = response_body(
         refusal=kind == "refusal",
         status="incomplete" if kind == "incomplete" else "completed",
@@ -155,8 +186,94 @@ async def test_provider_failures_are_not_unknown(provider_factory, kind: str) ->
         assert any(
             (span.attributes or {}).get("sarcasm.error_code") == caught.value.code for span in spans
         )
+        root = next(span for span in spans if span.name == "sarcasm-classification")
+        assert root.attributes["langfuse.observation.metadata.outcome"] == "error"
+        assert root.attributes["langfuse.observation.level"] == "ERROR"
+        assert root.status.status_code == StatusCode.ERROR
+        assert {score["name"]: score["value"] for score in scores} == {
+            "response_contract": 0,
+            "latency_ms": pytest.approx(root.attributes["sarcasm.elapsed_ms"]),
+        }
+        assert MARKER not in repr(scores)
         for span in spans:
             assert MARKER not in repr(dict(span.attributes or {}))
             assert not span.events and not span.status.description
+    finally:
+        await classifier.close()
+
+
+async def test_unknown_is_valid_abstention_not_an_error(provider_factory) -> None:
+    make, spans, _, scores = provider_factory
+    classifier = make(response_body(label="Unknown"))
+    try:
+        result = await classifier.classify(
+            MARKER, str(uuid4()), langfuse_public_key=classifier.public_key
+        )
+        classifier.tracer.flush()
+        root = next(span for span in spans if span.name == "sarcasm-classification")
+        assert result.label == Label.UNKNOWN
+        assert root.attributes["sarcasm.outcome"] == "abstained"
+        assert root.attributes["langfuse.observation.level"] == "WARNING"
+        assert root.status.status_code != StatusCode.ERROR
+        assert {score["name"]: score["value"] for score in scores}.items() >= {
+            "response_contract": 1,
+            "abstained": 1,
+        }.items()
+    finally:
+        await classifier.close()
+
+
+async def test_cancelled_attempt_has_failed_contract_and_no_abstention(
+    provider_factory, monkeypatch
+) -> None:
+    make, spans, _, scores = provider_factory
+    classifier = make()
+
+    async def cancel(**kwargs):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(classifier.api.responses, "parse", cancel)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await classifier.classify(
+                MARKER, str(uuid4()), langfuse_public_key=classifier.public_key
+            )
+        classifier.tracer.flush()
+        root = next(span for span in spans if span.name == "sarcasm-classification")
+        assert root.attributes["sarcasm.error_code"] == "request_cancelled"
+        assert root.attributes["langfuse.observation.level"] == "ERROR"
+        assert {score["name"]: score["value"] for score in scores} == {
+            "response_contract": 0,
+            "latency_ms": pytest.approx(root.attributes["sarcasm.elapsed_ms"]),
+        }
+    finally:
+        await classifier.close()
+
+
+async def test_export_drops_arbitrary_metadata_and_unapproved_prefixes(provider_factory) -> None:
+    from opentelemetry import trace
+
+    make, spans, _, _ = provider_factory
+    classifier = make()
+    try:
+        with classifier.tracer.start_as_current_observation(name="privacy-check"):
+            trace.get_current_span().set_attributes(
+                {
+                    "sarcasm.secret": MARKER,
+                    "langfuse.trace.metadata.secret": MARKER,
+                    "langfuse.observation.metadata.secret": MARKER,
+                    "langfuse.experiment.metadata": MARKER,
+                    "langfuse.experiment.item.metadata": MARKER,
+                    "langfuse.experiment.item.expected_output": MARKER,
+                    "langfuse.observation.status_message": MARKER,
+                    "sarcasm.outcome": "success",
+                    "langfuse.experiment.name": "approved-run",
+                }
+            )
+        classifier.tracer.flush()
+        attrs = dict(spans[0].attributes)
+        assert MARKER not in repr(attrs)
+        assert attrs["langfuse.observation.metadata.outcome"] == "success"
+        assert attrs["langfuse.experiment.name"] == "approved-run"
     finally:
         await classifier.close()

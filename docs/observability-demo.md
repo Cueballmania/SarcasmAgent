@@ -19,7 +19,8 @@ Prepare these tabs so the talk does not depend on running RPI or a full evaluati
 1. The finished audience app and one previously authorized synthetic request.
 2. Its `sarcasm-classification` trace, plus a saved `Unknown` example and an error
    trace if one already exists. Do not induce failures on a shared deployment.
-3. A completed evaluation's `experiment-item-run` trace and its
+3. A completed evaluation's `experiment-item-run` trace, its
+   `experiment-item-task` child (the item score target), and its
    `evaluate.sarcasm` summary trace. The report's `run_name`,
    `summary_trace_id` and `cases[].trace_id` identify the exact evidence.
 4. The corresponding local report and revision-bound checker result.
@@ -31,10 +32,18 @@ holdout; do not tune against the holdout during the talk. No reviewed dataset or
 quality claim is shipped with this repository. Unit-test fixtures are integration
 evidence, not a demonstration of model accuracy.
 
-The locked Python SDK is v3. Local experiment presentation depends on the
-Langfuse server version: use the trace names/IDs and Scores view as the reliable
-navigation path. If your server exposes local experiments in its Experiments
-view, the preserved experiment attributes also support that grouping.
+The locked Python SDK is v5.2.0, compatible with the observations-first data
+model. It requires Langfuse Cloud or a self-hosted server at v4.59.0 or later.
+Local-data experiments now persist native run-level scores as well as item
+scores. Use the Experiments view for grouping, or the trace names/IDs and Scores
+view for direct navigation.
+
+Deploy the updated locked dependencies before November 16, 2026; changing this
+repository does not update an already running service. After deployment, check
+that newly ingested observations report Python SDK v5 and that metadata, item
+scores and run scores appear. The migration dashboard checks recent activity, so
+older SDK configurations may remain visible during its three-day lookback.
+Offline tests do not clear that dashboard warning or prove live delivery.
 
 ## Five-minute walkthrough
 
@@ -84,8 +93,8 @@ the release policy uses the run's p95.
 The separate `evaluate.sarcasm` trace persists numeric aggregate scores for local
 datasets, including accuracy, macro-F1, coverage, answered accuracy when defined,
 Unknown/failure rates, p50/p95, missing measurements and each class's
-precision/recall/F1/support. This is explicit because the locked SDK automatically
-persists run-level scores only for hosted-dataset runs.
+precision/recall/F1/support. This summary preserves the report's stable trace
+link and explicit release-gate signal alongside v5's native experiment scores.
 
 The local report also contains the confusion matrix, full metrics by dataset
 tag, failure-code counts, and per-case expected/predicted labels, trace ID,

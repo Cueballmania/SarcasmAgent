@@ -1,5 +1,6 @@
 """Public OpenTelemetry export filtering for metadata-only Langfuse traces."""
 
+import json
 import logging
 from typing import Any
 
@@ -62,8 +63,9 @@ def sanitized_span(span: ReadableSpan) -> ReadableSpan:
     for key, value in list(attributes.items()):
         if key.startswith("sarcasm."):
             field = key.removeprefix("sarcasm.")
-            attributes[f"langfuse.observation.metadata.{field}"] = value
-            attributes[f"langfuse.trace.metadata.{field}"] = value
+            encoded = json.dumps(value, ensure_ascii=False)
+            attributes[f"langfuse.observation.metadata.{field}"] = encoded
+            attributes[f"langfuse.trace.metadata.{field}"] = encoded
     outcome = attributes.get("sarcasm.outcome")
     if outcome in {"error", "abstained"}:
         attributes["langfuse.observation.level"] = "ERROR" if outcome == "error" else "WARNING"

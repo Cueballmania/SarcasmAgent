@@ -244,8 +244,7 @@ def experiment(
                 ),
                 "limitation": "No statistical sufficiency claim",
             }
-        # Local-data experiments have no dataset_run_id, so the v3 SDK does not
-        # persist run_evaluators. Give aggregate scores their own trace.
+        # Keep a stable summary trace/report link alongside native experiment scores.
         with tracer.start_as_current_observation(name="evaluate.sarcasm") as summary:
             trace.get_current_span().set_attributes(run_metadata)
             for score in aggregate():

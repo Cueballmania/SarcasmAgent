@@ -78,12 +78,10 @@ def provider_factory(monkeypatch: pytest.MonkeyPatch):
         )
 
         def score_transport(request):
-            scores.extend(
-                event["body"]
-                for event in json.loads(request.content)["batch"]
-                if event["type"] == "score-create"
-            )
-            return httpx.Response(200, json={"successes": [], "errors": []})
+            assert request.method == "POST"
+            assert request.url.path == "/api/public/scores"
+            scores.extend(json.loads(request.content))
+            return httpx.Response(202, json={"message": "Accepted"})
 
         tracer = Langfuse(
             public_key=key,
@@ -135,9 +133,11 @@ async def test_typed_parse_trace_and_export_privacy(provider_factory, caplog) ->
         assert MARKER not in repr(scores)
         root = next(span for span in spans if span.name == "sarcasm-classification")
         attrs = root.attributes
-        assert attrs["langfuse.observation.metadata.outcome"] == "success"
-        assert attrs["langfuse.trace.metadata.request_id"] == attrs["sarcasm.request_id"]
-        assert attrs["langfuse.observation.metadata.input_length"] == len(MARKER)
+        assert json.loads(attrs["langfuse.observation.metadata.outcome"]) == "success"
+        assert (
+            json.loads(attrs["langfuse.trace.metadata.request_id"]) == attrs["sarcasm.request_id"]
+        )
+        assert json.loads(attrs["langfuse.observation.metadata.input_length"]) == len(MARKER)
         assert root.resource.attributes["service.name"] == "sarcasm-agent"
         assert root.resource.attributes["deployment.environment"] == "test"
         assert {score["name"]: score["value"] for score in scores} == {
@@ -187,7 +187,7 @@ async def test_provider_failures_are_not_unknown(provider_factory, kind: str) ->
             (span.attributes or {}).get("sarcasm.error_code") == caught.value.code for span in spans
         )
         root = next(span for span in spans if span.name == "sarcasm-classification")
-        assert root.attributes["langfuse.observation.metadata.outcome"] == "error"
+        assert json.loads(root.attributes["langfuse.observation.metadata.outcome"]) == "error"
         assert root.attributes["langfuse.observation.level"] == "ERROR"
         assert root.status.status_code == StatusCode.ERROR
         assert {score["name"]: score["value"] for score in scores} == {
@@ -273,7 +273,7 @@ async def test_export_drops_arbitrary_metadata_and_unapproved_prefixes(provider_
         classifier.tracer.flush()
         attrs = dict(spans[0].attributes)
         assert MARKER not in repr(attrs)
-        assert attrs["langfuse.observation.metadata.outcome"] == "success"
+        assert json.loads(attrs["langfuse.observation.metadata.outcome"]) == "success"
         assert attrs["langfuse.experiment.name"] == "approved-run"
     finally:
         await classifier.close()

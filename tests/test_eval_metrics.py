@@ -226,12 +226,13 @@ def test_actual_experiment_sdk_is_bounded_and_offline(
 
     def tracer_factory(**kwargs):
         def transport(request):
-            scores.extend(
-                event["body"]
-                for event in json.loads(request.content)["batch"]
-                if event["type"] == "score-create"
-            )
-            return httpx.Response(200, json={"successes": [], "errors": []})
+            if request.method == "GET":
+                assert request.url.path == "/api/public/projects"
+                return httpx.Response(200, json={"data": []})
+            assert request.method == "POST"
+            assert request.url.path == "/api/public/scores"
+            scores.extend(json.loads(request.content))
+            return httpx.Response(202, json={"message": "Accepted"})
 
         return Langfuse(
             **kwargs,
@@ -281,7 +282,7 @@ def test_actual_experiment_sdk_is_bounded_and_offline(
     summary_scores = {
         score["name"]: score["value"]
         for score in scores
-        if score["traceId"] == report["summary_trace_id"]
+        if score.get("traceId") == report["summary_trace_id"]
     }
     assert summary_scores["macro_f1"] == report["metrics"]["macro_f1"]
     assert summary_scores["unknown_recall"] == 1
@@ -297,10 +298,29 @@ def test_actual_experiment_sdk_is_bounded_and_offline(
         span.attributes["langfuse.experiment.name"] == report["run_name"]
         for span in experiment_roots
     )
+    experiment_tasks = [span for span in spans if span.name == "experiment-item-task"]
+    assert len(experiment_tasks) == 3
     assert all(
-        span.attributes["langfuse.observation.metadata.expected_label"] in labels
-        for span in experiment_roots
+        json.loads(span.attributes["langfuse.observation.metadata.expected_label"]) in labels
+        for span in experiment_tasks
     )
+    root_ids = {span.context.span_id for span in experiment_roots}
+    assert all(span.parent.span_id in root_ids for span in experiment_tasks)
+    assert all(
+        span.attributes["langfuse.experiment.item.root_observation_id"]
+        == format(span.context.span_id, "016x")
+        for span in experiment_tasks
+    )
+    experiment_ids = {span.attributes["langfuse.experiment.id"] for span in experiment_roots}
+    assert len(experiment_ids) == 1
+    experiment_id = experiment_ids.pop()
+    run_scores = {
+        score["name"]: score["value"]
+        for score in scores
+        if score.get("datasetRunId") == experiment_id
+    }
+    assert run_scores["macro_f1"] == report["metrics"]["macro_f1"]
+    assert run_scores["unknown_recall"] == 1
     assert report["slices"]["all-cases"]["macro_f1"] == report["metrics"]["macro_f1"]
     for item in report["cases"]:
         if not item["trace_id"]:
@@ -310,12 +330,29 @@ def test_actual_experiment_sdk_is_bounded_and_offline(
         case_scores = {
             score["name"]: score["value"]
             for score in scores
-            if score["traceId"] == item["trace_id"]
+            if score.get("traceId") == item["trace_id"]
         }
         assert case_scores["exact_label"] == int(item["failure"] is None)
         assert case_scores["eval_response_contract"] == int(item["failure"] is None)
         assert case_scores["abstention_correct"] == int(item["failure"] is None)
         assert "latency_within_target" in case_scores
+        task_span = next(
+            span
+            for span in experiment_tasks
+            if format(span.context.trace_id, "032x") == item["trace_id"]
+        )
+        assert all(
+            score["observationId"] == format(task_span.context.span_id, "016x")
+            for score in scores
+            if score.get("traceId") == item["trace_id"]
+            and score["name"]
+            in {
+                "exact_label",
+                "eval_response_contract",
+                "abstention_correct",
+                "latency_within_target",
+            }
+        )
         assert item["cost_usd"] is None
     if failure_mode != "none":
         code = "provider_error" if failure_mode == "provider" else "experiment_case_missing"

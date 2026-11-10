@@ -57,6 +57,8 @@ async def test_phone_form_and_static_assets_are_audited() -> None:
         assert 'for="message"' in response.text and 'role="status"' in response.text
         assert 'role="alert"' in response.text and 'method="post"' in response.text
         assert "metadata" in response.text and "Unknown" in response.text
+        assert "stored in Langfuse" in response.text and "displayed to everyone" in response.text
+        assert "not your message text" not in response.text
         assert (await client.get("/static/app.js")).status_code == 200
         assert (await client.get("/static/app.css")).status_code == 200
         assert len(store.rows) == 3 and detector.calls == 0

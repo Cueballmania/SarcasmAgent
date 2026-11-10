@@ -1,8 +1,7 @@
-"""Public OpenTelemetry export filtering for metadata-only Langfuse traces."""
+"""Demo content capture with bounded non-content OpenTelemetry attributes."""
 
 import json
 import logging
-from typing import Any
 
 from opentelemetry.context import Context
 from opentelemetry.sdk.resources import Resource
@@ -11,6 +10,8 @@ from opentelemetry.trace import Status
 
 SAFE_ATTRIBUTES = {
     "langfuse.observation.type",
+    "langfuse.observation.input",
+    "langfuse.observation.output",
     "langfuse.observation.model.name",
     "langfuse.observation.usage_details",
     "langfuse.observation.cost_details",
@@ -46,20 +47,18 @@ SAFE_METADATA = {
 }
 
 
-def mask_data(*, data: Any) -> str:
-    """Remove SDK-captured input/output/metadata before span creation."""
-    return "[redacted]"
-
-
 def sanitized_span(span: ReadableSpan) -> ReadableSpan:
-    """Copy a span without prompts, exception details, links or arbitrary attributes."""
+    """Keep intentional content but omit exception details and arbitrary attributes."""
     attributes = {
         key: value
         for key, value in (span.attributes or {}).items()
         if key in SAFE_ATTRIBUTES
         or (key.startswith("sarcasm.") and key.removeprefix("sarcasm.") in SAFE_METADATA)
     }
-    # Project approved fields after SDK masking, never arbitrary SDK metadata.
+    # SDK experiment failures put exception text in output, not just status_message.
+    if attributes.get("langfuse.observation.level") == "ERROR":
+        attributes.pop("langfuse.observation.output", None)
+    # Project approved fields, never arbitrary SDK metadata.
     for key, value in list(attributes.items()):
         if key.startswith("sarcasm."):
             field = key.removeprefix("sarcasm.")

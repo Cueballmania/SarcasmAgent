@@ -19,7 +19,7 @@ from app.contracts import (
     Label,
     ModelLabel,
 )
-from app.tracing import PrivacyTracerProvider, mask_data
+from app.tracing import PrivacyTracerProvider
 
 
 @dataclass(frozen=True)
@@ -55,7 +55,6 @@ class Classifier:
             base_url=settings.langfuse_base_url,
             environment=settings.app_env,
             release=settings.deploy_revision,
-            mask=mask_data,
             timeout=2,
             tracer_provider=PrivacyTracerProvider(
                 environment=settings.app_env, release=settings.deploy_revision
@@ -78,6 +77,7 @@ class Classifier:
         started = monotonic()
         label = None
         span = trace.get_current_span()
+        self.tracer.update_current_span(input={"message": message})
         span.set_attributes(
             {
                 "sarcasm.request_id": request_id,
@@ -131,6 +131,7 @@ class Classifier:
                     )
                 label = response.output_parsed.label
             span.set_attribute("sarcasm.label", label.value)
+            self.tracer.update_current_span(output={"label": label.value})
             usage = response.usage
             if usage:
                 span.set_attributes(

@@ -44,9 +44,12 @@ Langfuse experiments are the traced runner; scikit-learn computes classification
 metrics. Re-evaluate relevant code/prompt/model/dataset changes. The checker binds
 the report to candidate revision and source/data/config hashes. Pilot/fixture,
 empty, unreviewed, stale or nonpassing evidence cannot authorize a release.
-Do not use public audience messages to build gold under the metadata-only policy.
+Do not silently reuse audience messages as gold or training data.
 
 The operator owns review records, threshold approval and release authorization.
+Demo messages/prompts/responses are retained in Langfuse for shared viewing.
+That capture authorization does not turn audience content into reviewed gold:
+reuse requires permission, independent review and the split/provenance rules above.
 Revisit the rubric when audience/language/model scope changes.
 
 ## Reading the Langfuse evidence

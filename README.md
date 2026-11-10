@@ -133,7 +133,17 @@ Live runs require explicit `--live`, reviewed non-fixture data, authorization,
 request/concurrency/token/cost caps and thresholds; PR CI never makes paid calls.
 
 Langfuse now includes runtime contract/abstention/latency scores, validation spans,
-native request/release metadata and linked evaluation traces. Local experiments
+native request/release metadata and linked evaluation traces. For the shared demo,
+Langfuse also stores the original message, full model prompt and model response.
+The classification observation exposes `input.message` and `output.label` for
+observation-level LLM-as-a-Judge evaluation. Explain shared viewing before taking
+submissions; do not submit secrets or confidential information. The PostgreSQL
+audit and local evaluation reports still omit message text. Deleting the Render
+database does **not** delete Langfuse data or provider-held copies.
+See the [manual judge setup and demo cleanup](docs/observability-demo.md#manual-openai-judge-setup)
+for the separate OpenAI connection, evaluator rule and teardown checklist.
+
+Local experiments
 persist aggregate and per-class scores on an `evaluate.sarcasm` summary trace;
 reports include text-free case evidence and trace IDs for diagnosis.
 See the [five-minute observability and evaluation walkthrough](docs/observability-demo.md)

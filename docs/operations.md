@@ -3,7 +3,8 @@
 ## Release sequence
 
 1. Approve hosting/database plan, same-region connection, Langfuse destination/data
-   policy, metadata retention, event SLO and request/spend limits. Keep automatic
+   policy (including readable demo prompts/responses), retention, event SLO and request/spend limits.
+   Explain shared viewing before audience submissions. Keep automatic
    production deploys off. Do not provision duplicate resources for an existing app.
 2. Verify candidate source/lock/runtime, complete required CI `checks`, review data,
    approve thresholds before the untouched holdout and run the capped candidate
@@ -16,7 +17,8 @@
    worker startup never creates or migrates tables.
 4. Manually roll out the exact candidate. Verify external HTTPS, `/health`, one
    authorized synthetic classification, its committed audit UUID, matching
-   Langfuse request/generation trace, usage and redacted content.
+   Langfuse request/generation trace, usage and readable message/prompt/response.
+   Verify unrelated metadata, credentials and exception diagnostics stay excluded.
 5. Perform an approved event-shaped test on isolated resources with explicit HTTP
    count/duration, model call/token/cost ceilings and pass/fail SLO. Include
    non-classification traffic, overload rejection and recovery; never flood or
@@ -34,7 +36,9 @@ enforces both exact-revision CI and current reviewed quality gates.
 Every admitted HTTP kind is logged: pages/assets/health, invalid/unmatched routes,
 rate rejection and classification. Initial pending commit precedes work; no
 success is sent before final commit. Transactions never span provider latency.
-Raw bodies/query strings/cookies/IPs/authorization are not persisted or logged.
+Raw bodies/query strings/cookies/IPs/authorization are not persisted in the audit or logged.
+Langfuse separately stores submitted message content and model prompts/responses
+for the shared demo; do not treat the metadata-only audit as a no-content-storage promise.
 Unmatched paths use a fixed route marker.
 
 The app bounds streamed input to 16 KiB/2,000 characters, classification to 20
@@ -78,8 +82,10 @@ expired metadata.
 
 ## Monitoring and incidents
 
-Use request UUIDs and trace IDs, not audience messages, for diagnosis. Keep database
-and Langfuse dashboard access operator-only. Query bounded UTC periods:
+Use request UUIDs and trace IDs for routine diagnosis, and inspect retained demo
+content only in the approved Langfuse project. Keep database and Langfuse access
+operator-controlled; the presenter may show selected traces to the notified audience
+without making the project publicly accessible. Query bounded UTC periods:
 
 ```sql
 SELECT state, http_status, error_code, count(*)
@@ -106,14 +112,17 @@ diagnostics, project credentials/region and dashboard connectivity.
 
 Uvicorn raw access logs are disabled; app diagnostics use safe codes/templates.
 Hosted proxies/providers may have their own logging/retention outside app control.
-SDK export filtering drops raw IO, exception events/status text and unapproved
-attributes. Recheck actual locked exports and privacy notice after SDK changes.
+SDK export filtering retains observation input/output for the demo but drops
+exception events/status text, exception-generated ERROR outputs and unapproved
+attributes. Recheck actual locked exports and the audience notice after SDK changes.
 The explicit application metadata allowlist is projected into native Langfuse
-metadata after masking; arbitrary `sarcasm.*` and SDK metadata are not admitted.
-Check the score ingestion channel too: it is separate from span masking.
+metadata; arbitrary `sarcasm.*` and SDK metadata are not admitted.
+Check the score ingestion channel too: it is separate from span filtering.
 Runtime contract/abstention/latency scores describe model attempts, not HTTP audit
 commitment or ground-truth accuracy. For score names, linked experiment reports
 and a short prepared demo, see the [observability guide](observability-demo.md).
+The guide also covers the separately billed OpenAI judge and post-demo Langfuse
+cleanup. Deleting Render PostgreSQL is not deletion of those external copies.
 
 ## Recovery and secret safety
 

@@ -273,8 +273,9 @@ def test_actual_experiment_sdk_is_bounded_and_offline(
     report = experiment(dataset, limits, split="holdout", settings=cfg)
     assert report["metrics"]["count"] == 3 and report["pass"] is (failure_mode == "none")
     assert len(calls) == 3 and report["reserved_cost_usd"] <= limits.max_cost_usd
-    assert "fixture0" not in repr([dict(span.attributes or {}) for span in spans])
-    assert "PRIVATE_EVAL_MARKER" not in repr(scores) + repr(report) + repr(spans)
+    exported = repr([dict(span.attributes or {}) for span in spans])
+    assert all(f"fixture{i}" in exported for i in range(3))
+    assert "PRIVATE_EVAL_MARKER" not in repr(scores) + repr(report) + exported
     assert "fixture0" not in json.dumps(report) + repr(scores)
     assert report["run_name"].startswith("sarcasm-" + limits.revision[:12])
     summary = next(span for span in spans if span.name == "evaluate.sarcasm")

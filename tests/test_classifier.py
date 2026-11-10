@@ -14,11 +14,12 @@ from opentelemetry.sdk.trace.export import SpanExportResult
 from opentelemetry.trace import StatusCode
 
 from app.classifier import Classifier
-from app.contracts import AppError, Label
-from app.tracing import PrivacyTracerProvider, configure_logging, mask_data
+from app.contracts import INSTRUCTION, AppError, Label
+from app.tracing import PrivacyTracerProvider, configure_logging
 from tests.test_config import settings
 
 MARKER = "PRIVATE_SYNTHETIC_MARKER"
+ERROR_MARKER = "PRIVATE_PROVIDER_ERROR_MARKER"
 
 
 def response_body(
@@ -87,7 +88,6 @@ def provider_factory(monkeypatch: pytest.MonkeyPatch):
             public_key=key,
             secret_key="sk-test",
             base_url="https://example.test",
-            mask=mask_data,
             tracer_provider=PrivacyTracerProvider(
                 environment=config.app_env, release=config.deploy_revision
             ),
@@ -99,7 +99,7 @@ def provider_factory(monkeypatch: pytest.MonkeyPatch):
         def transport(request):
             calls.append(json.loads(request.content))
             if timeout:
-                raise httpx.ReadTimeout(MARKER, request=request)
+                raise httpx.ReadTimeout(ERROR_MARKER, request=request)
             return httpx.Response(status, json=body or response_body())
 
         api = AsyncOpenAI(
@@ -112,7 +112,7 @@ def provider_factory(monkeypatch: pytest.MonkeyPatch):
     return make, spans, calls, scores
 
 
-async def test_typed_parse_trace_and_export_privacy(provider_factory, caplog) -> None:
+async def test_typed_parse_captures_content_without_logging_it(provider_factory, caplog) -> None:
     configure_logging()
     logging.getLogger("openai").warning(MARKER)
     assert MARKER not in caplog.text and "telemetry_sdk_diagnostic" in caplog.text
@@ -129,10 +129,23 @@ async def test_typed_parse_trace_and_export_privacy(provider_factory, caplog) ->
         assert result.trace_id
         assert calls[0]["store"] is False and calls[0]["reasoning"]["effort"] == "none"
         assert len(calls) == 1
-        assert MARKER not in repr([dict(span.attributes) for span in spans])
         assert MARKER not in repr(scores)
         root = next(span for span in spans if span.name == "sarcasm-classification")
         attrs = root.attributes
+        assert json.loads(attrs["langfuse.observation.input"]) == {"message": MARKER}
+        assert json.loads(attrs["langfuse.observation.output"]) == {"label": result.label.value}
+        generation = next(
+            span
+            for span in spans
+            if span.attributes.get("langfuse.observation.type") == "generation"
+        )
+        assert json.loads(generation.attributes["langfuse.observation.input"]) == [
+            {"role": "system", "content": INSTRUCTION},
+            {"role": "user", "content": MARKER},
+        ]
+        generated = json.loads(generation.attributes["langfuse.observation.output"])
+        assert json.loads(generated["content"][0]["text"]) == {"label": result.label.value}
+        assert "test-key" not in repr([dict(span.attributes) for span in spans])
         assert json.loads(attrs["langfuse.observation.metadata.outcome"]) == "success"
         assert (
             json.loads(attrs["langfuse.trace.metadata.request_id"]) == attrs["sarcasm.request_id"]
@@ -164,7 +177,8 @@ async def test_typed_parse_trace_and_export_privacy(provider_factory, caplog) ->
 
 
 @pytest.mark.parametrize("kind", ["refusal", "incomplete", "invalid_label", "provider", "timeout"])
-async def test_provider_failures_are_not_unknown(provider_factory, kind: str) -> None:
+async def test_provider_failures_are_not_unknown(provider_factory, kind: str, caplog) -> None:
+    configure_logging()
     make, spans, calls, scores = provider_factory
     body = response_body(
         refusal=kind == "refusal",
@@ -172,7 +186,7 @@ async def test_provider_failures_are_not_unknown(provider_factory, kind: str) ->
         label="wrong" if kind == "invalid_label" else "Unknown",
     )
     if kind == "provider":
-        body = {"error": {"message": MARKER, "type": "server_error"}}
+        body = {"error": {"message": ERROR_MARKER, "type": "server_error"}}
     classifier = make(body, status=500 if kind == "provider" else 200, timeout=kind == "timeout")
     try:
         with pytest.raises(AppError) as caught:
@@ -187,6 +201,8 @@ async def test_provider_failures_are_not_unknown(provider_factory, kind: str) ->
             (span.attributes or {}).get("sarcasm.error_code") == caught.value.code for span in spans
         )
         root = next(span for span in spans if span.name == "sarcasm-classification")
+        assert json.loads(root.attributes["langfuse.observation.input"]) == {"message": MARKER}
+        assert "langfuse.observation.output" not in root.attributes
         assert json.loads(root.attributes["langfuse.observation.metadata.outcome"]) == "error"
         assert root.attributes["langfuse.observation.level"] == "ERROR"
         assert root.status.status_code == StatusCode.ERROR
@@ -195,8 +211,10 @@ async def test_provider_failures_are_not_unknown(provider_factory, kind: str) ->
             "latency_ms": pytest.approx(root.attributes["sarcasm.elapsed_ms"]),
         }
         assert MARKER not in repr(scores)
+        assert ERROR_MARKER not in repr(scores) + caplog.text
+        assert MARKER not in caplog.text
         for span in spans:
-            assert MARKER not in repr(dict(span.attributes or {}))
+            assert ERROR_MARKER not in repr(dict(span.attributes or {}))
             assert not span.events and not span.status.description
     finally:
         await classifier.close()
@@ -212,6 +230,7 @@ async def test_unknown_is_valid_abstention_not_an_error(provider_factory) -> Non
         classifier.tracer.flush()
         root = next(span for span in spans if span.name == "sarcasm-classification")
         assert result.label == Label.UNKNOWN
+        assert json.loads(root.attributes["langfuse.observation.output"]) == {"label": "Unknown"}
         assert root.attributes["sarcasm.outcome"] == "abstained"
         assert root.attributes["langfuse.observation.level"] == "WARNING"
         assert root.status.status_code != StatusCode.ERROR
@@ -240,6 +259,8 @@ async def test_cancelled_attempt_has_failed_contract_and_no_abstention(
             )
         classifier.tracer.flush()
         root = next(span for span in spans if span.name == "sarcasm-classification")
+        assert json.loads(root.attributes["langfuse.observation.input"]) == {"message": MARKER}
+        assert "langfuse.observation.output" not in root.attributes
         assert root.attributes["sarcasm.error_code"] == "request_cancelled"
         assert root.attributes["langfuse.observation.level"] == "ERROR"
         assert {score["name"]: score["value"] for score in scores} == {

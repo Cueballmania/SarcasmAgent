@@ -28,10 +28,12 @@
     <h2 id="about-heading">A demonstration, not a verdict</h2>
     <p>Sarcasm is subjective. The classifier can be wrong or return Unknown when context,
        language, or conflicting cues make the meaning unclear.</p>
-    <p>Your message is processed by OpenAI. This app stores request metadata for
-       {{ retention_days }} days, not your message text. Langfuse receives minimized trace
-       metadata. External providers may retain processing data under their own policies.
-       Please do not submit personal or confidential information.</p>
+    <p>Your message is processed by OpenAI. Your message, the model prompt and the
+       classifier response are stored in Langfuse and may be displayed to everyone
+       during this demo. The app database stores request metadata for
+       {{ retention_days }} days; Langfuse storage and deletion are managed separately.
+       External providers may retain processing data under their own policies.
+       Please do not submit secrets or confidential information.</p>
   </section>
   <footer><a href="/presenter">Presenter QR and downloads</a></footer>
 </main>

@@ -1,6 +1,7 @@
 """Audited API failures, bounded admission and cross-surface privacy."""
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from uuid import UUID
 
@@ -174,7 +175,7 @@ async def test_model_slots_reject_busy_without_provider_or_quota_reservation() -
 
 
 @pytest.mark.postgres
-async def test_synthetic_marker_sweep_db_logs_actual_exports(
+async def test_content_is_traced_but_not_in_audit_logs_or_scores(
     db: Database, provider_factory, caplog
 ) -> None:
     make, spans, calls, scores = provider_factory
@@ -191,6 +192,10 @@ async def test_synthetic_marker_sweep_db_logs_actual_exports(
             assert row.trace_id and row.label == "Sarcasm Detected"
             assert MARKER not in repr(values)
         assert MARKER not in caplog.text
-        assert MARKER not in repr([dict(span.attributes or {}) for span in spans])
+        root = next(span for span in spans if span.name == "sarcasm-classification")
+        assert json.loads(root.attributes["langfuse.observation.input"]) == {"message": MARKER}
+        assert json.loads(root.attributes["langfuse.observation.output"]) == {
+            "label": response.json()["label"]
+        }
         assert MARKER not in repr(scores)
         assert all(score["traceId"] == row.trace_id for score in scores)

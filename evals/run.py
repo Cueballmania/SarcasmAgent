@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from app.classifier import Classifier
 from app.config import Settings
 from app.contracts import MODEL, PROMPT_REVISION, SCHEMA_REVISION, AppError, Label
-from app.tracing import PrivacyTracerProvider, configure_logging, mask_data
+from app.tracing import PrivacyTracerProvider, configure_logging
 from evals.contracts import Budget, Dataset, RunConfig, file_hash
 from evals.metrics import passes, summarize
 
@@ -66,7 +66,6 @@ def experiment(
         base_url=settings.langfuse_base_url,
         environment=settings.app_env,
         release=config.revision,
-        mask=mask_data,
         timeout=2,
         tracer_provider=PrivacyTracerProvider(
             environment=settings.app_env, release=config.revision

@@ -1,0 +1,180 @@
+<!doctype html>
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>From RPI to a Maintained AI App</title>
+  <link rel="stylesheet" href="vendor/reveal.css">
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="components.css">
+  <script defer src="vendor/reveal.js"></script>
+  <script defer src="config.js"></script>
+  <script defer src="content.js"></script>
+  <script defer src="components.js"></script>
+  <script defer src="deck.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#presenter-controls">Skip to presentation controls</a>
+  <div id="startup" role="status">Loading the presentation. Run npm ci and npm run build in the deck directory, then open dist/index.html.</div>
+  <noscript>Enable JavaScript for the presentation controls. This deck does not run a live agent.</noscript>
+  <div class="reveal">
+    <main class="slides" tabindex="0" aria-label="Presentation">
+      <section id="opening" class="cover-slide" data-title="From RPI to a maintained AI app" data-chapter="The story" data-sources="rpi,application">
+        <div class="slide-meta"><span class="tag">HVE Core / practical workflow</span></div>
+        <p class="opening-kicker">AI-assisted development, with an evidence trail</p>
+        <h1>From RPI to a<br><span class="accent-text">maintained AI app</span></h1>
+        <p class="lead">Build deliberately. Keep learning after release.</p>
+        <ol class="opening-path" aria-label="Presentation story">
+          <li><span>01</span> Understand the change</li>
+          <li><span>02</span> Ship with evidence</li>
+          <li><span>03</span> Observe and evaluate</li>
+        </ol>
+        <div class="slide-bottom"><span>HVE Core + the Sarcasm Agent example</span><span>10 November 2026</span></div>
+        <aside class="notes">Allow about 45 seconds. The original idea was to build and deploy from scratch during the talk. Instead, explain the workflow and then show a finished application. The point is not how fast an assistant can generate files: it is how a team retains evidence about decisions, implementation, release and behavior. RPI names Research, Plan and Implement; the coordinated workflow also includes Review and Follow-up. Our example is a single-model sarcasm classifier, not a tool-using autonomous agent. The maintenance principles transfer to more complex agentic applications. This deck is an explanation, not a recording of deployment or model-quality results.</aside>
+      </section>
+
+      <section id="initial-prompt" data-title="The prompt that started it" data-chapter="The initial prompt" data-sources="">
+        <div class="slide-meta"><span class="tag">Original user prompt / verbatim</span></div>
+        <h2>The prompt that started it</h2>
+        <div class="slide-body">
+          <blockquote class="initial-prompt">
+            <div class="prompt-command"><code>/hve-core:rpi-research</code></div>
+            <p>Create a UV python app that detects sarcasm. I want it to uses GPT 5.4-mini from Open AI's API.</p>
+            <p>I want it to log every request with a postgreSQL database using SQLAlchemy and I want to use Langfuse's observe decorator for trace monitoring.</p>
+            <p>The App will be deployed on Render and deployed for my audience to send it prompts. Please also give me a QR code for the audience to quickly navigate to the site and post their message for sarcasm detection.</p>
+            <p>The responses that I want are "Sarcasm Detected", "No Sarcasm Detected", "Unknown". I want to implement some industry standard evaluations and observability.</p>
+          </blockquote>
+        </div>
+        <aside class="notes">Allow about 30 seconds. This is the original prompt supplied by the presenter, quoted verbatim with paragraph breaks added for readability. Point out the goal, chosen stack, audience experience and explicit request for evaluations and observability. Then introduce how the RPI loop turns that request into scoped work and evidence. The quoted requirements describe the starting intent, not proof of completed deployment or evaluation results.</aside>
+      </section>
+
+      <section id="rpi-foundations" data-title="HVE Core's RPI loop" data-chapter="The RPI loop" data-sources="rpi,research,planning,implementation,review">
+        <div class="slide-meta"><span class="tag">HVE Core / RPI loop</span></div>
+        <h2>HVE Core's RPI loop</h2>
+        <div class="slide-body">
+          <ol class="phase-grid" aria-label="HVE Core RPI loop">
+            <li class="phase-card">
+              <span class="phase-number">01</span>
+              <h3>Research</h3>
+              <p>Understand the problem.</p>
+            </li>
+            <li class="phase-card">
+              <span class="phase-number">02</span>
+              <h3>Plan</h3>
+              <p>Scope the next change.</p>
+            </li>
+            <li class="phase-card">
+              <span class="phase-number">03</span>
+              <h3>Implement</h3>
+              <p>Build and test.</p>
+            </li>
+            <li class="phase-card">
+              <span class="phase-number">04</span>
+              <h3>Review</h3>
+              <p>Check the evidence.</p>
+            </li>
+            <li class="phase-card">
+              <span class="phase-number">05</span>
+              <h3>Follow-up</h3>
+              <p>Choose the next change.</p>
+            </li>
+          </ol>
+          <div class="loop-return">
+            <span aria-hidden="true">&#8634;</span>
+            <p>Follow-up feeds the next Research &#8594; Plan &#8594; Implement cycle.</p>
+          </div>
+        </div>
+        <a class="rpi-reference" data-source-link="rpi" href="https://github.com/microsoft/hve-core/blob/main/.github/skills/rpi/rpi/SKILL.md" target="_blank" rel="noopener noreferrer">Explore HVE Core's RPI workflow &#8599;</a>
+        <aside class="notes">Allow about one minute. RPI names Research, Plan and Implement. HVE Core's coordinated workflow also includes Review and Follow-up, so show the complete loop rather than treating implementation as the finish line. Research establishes the facts, Plan bounds the change, Implement builds and validates it, Review compares the result with the plan, and Follow-up selects required remaining work. Evidence from running and evaluating the app can start the next scoped RPI cycle. Follow-ups need not repeat investigation when existing evidence is adequate. The visible link opens the official RPI skill contract. RPI Agent is an optional coordinator; the phase skills also work standalone. Manual and automatic progression have explicit boundaries, and neither removes required approvals.</aside>
+      </section>
+
+      <section id="rpi-in-practice" data-title="How we used RPI" data-chapter="RPI in practice" data-sources="rpi,tracing,evaluations">
+        <div class="slide-meta"><span class="tag">Our Langfuse update</span></div>
+        <h2>How we used RPI</h2>
+        <div class="slide-body">
+          <div class="practice-grid">
+            <article class="practice-step"><span class="trail-label">Research</span><h3>Find the gap</h3><p>Check the SDK and existing traces.</p></article>
+            <article class="practice-step"><span class="trail-label">Plan</span><h3>Bound the change</h3><p>Scope metadata, scores and tests.</p></article>
+            <article class="practice-step"><span class="trail-label">Implement + review</span><h3>Verify the result</h3><p>Add the missing evaluation evidence.</p></article>
+          </div>
+        </div>
+        <aside class="notes">Allow about 45 seconds. Use the actual Langfuse enhancement as the concrete RPI example. Research found that the locked SDK did not persist aggregate scores for our local-data experiments, and that our metadata filter removed useful linkage. Planning bounded the fix to richer metadata, runtime and evaluation scores, and focused validation. Implementation added explicit evaluation summary traces, safe metadata and tests; Review checked the changes against the plan. The work was committed and pushed on a feature branch. This is code and validation evidence, not proof of production rollout or measured model quality.</aside>
+      </section>
+
+      <section id="development-deployment" data-title="Quick path to prod" data-chapter="Quick path to prod" data-sources="application,ci,hosting,operations">
+        <div class="slide-meta"><span class="tag">Our app + managed services</span></div>
+        <h2>Quick path to prod</h2>
+        <div class="slide-body">
+          <ol class="release-flow" aria-label="App development and hosting path">
+            <li><span class="step-number">01</span><h3>Build the app</h3><p>FastAPI + OpenAI</p><span class="flow-owner">Local tests</span></li>
+            <li><span class="step-number">02</span><h3>Push the code</h3><p>GitHub repository</p><span class="flow-owner">Lockfile + offline CI</span></li>
+            <li><span class="step-number">03</span><h3>Host on Render</h3><p>Existing service + PostgreSQL</p><span class="flow-owner">Configuration + approved rollout</span></li>
+          </ol>
+          <div class="release-rule"><strong>Langfuse</strong><span>Add shared traces and evaluation scores to the same app.</span></div>
+        </div>
+        <p class="footnote">A small Python app and managed services, without a custom deployment platform.</p>
+        <aside class="notes">Allow about one minute. Tell the practical build-and-hosting story rather than reciting the full release runbook. We built a UV/FastAPI app using OpenAI, PostgreSQL auditing and Langfuse instrumentation, ran isolated tests, and committed and pushed the work to GitHub. The repository targets the already-connected Render service: locked dependencies, a Uvicorn start command, environment configuration and an approved database migration. This diagram is that concrete hosting path, not proof that the latest feature branch is deployed. The recent observability change was pushed separately; no live deployment was verified during that work. Current CI is offline. A hosted evaluation job is still a proposed addition. Reviewed holdout evidence, explicit spend limits and rollout authorization remain release requirements; the short path does not bypass them.</aside>
+      </section>
+
+      <section id="evaluations-observability" data-title="Maintenance needs a feedback loop" data-chapter="Evals + observability" data-sources="tracing,evaluations,langfuse,dashboards">
+        <div class="slide-meta"><span class="tag">Shared evidence / Langfuse</span></div>
+        <h2>Maintenance needs a feedback loop</h2>
+        <div class="slide-body">
+          <div class="evidence-pair">
+            <article class="evidence-card">
+              <span class="label">Observability</span>
+              <h3>What happened?</h3>
+              <p>Trace requests, latency and failures.</p>
+            </article>
+            <article class="evidence-card evaluation-card">
+              <span class="label">Evaluations</span>
+              <h3>Was it right?</h3>
+              <p>Check results against reviewed examples.</p>
+            </article>
+          </div>
+          <div class="evidence-rule"><strong>Make both part of every change.</strong><p>Langfuse connects the evidence to the next RPI cycle.</p></div>
+        </div>
+        <aside class="notes">Allow about one minute. The core point is that observability and evaluations are essential parts of maintaining the app, not an optional final polish. Observability explains a request's execution; reviewed evaluations check whether its outcome was correct. A valid response can still be wrong, and an Unknown-rate trend is not a ground-truth accuracy score. Langfuse provides shared traces and linked scores so the evidence can guide another scoped RPI change. Our implementation exports runtime scores, per-case evaluation scores and explicit run summaries; detailed matrices and slices still live in JSON reports. No real accuracy results or preconfigured dashboards are claimed here. Keep audience text out of exported telemetry, and separate runtime and evaluation traffic. The hosted app and a future hosted evaluator run outside Langfuse; the current CI does not make live model calls.</aside>
+      </section>
+
+      <section id="finished-product-demo" class="closing-slide" data-title="Demo: the Sarcasm Agent" data-chapter="Demo" data-sources="demo,application,langfuse">
+        <div class="slide-meta"><span class="tag">Sarcasm Agent / demo</span></div>
+        <h2>Demo: the Sarcasm Agent</h2>
+        <div class="slide-body">
+          <p class="demo-invitation">Can it spot sarcasm?</p>
+          <ol class="demo-stops" aria-label="Demo order">
+            <li><span>1</span><h3>Try a message</h3></li>
+            <li><span>2</span><h3>Follow its trace</h3></li>
+            <li><span>3</span><h3>Inspect an evaluation</h3></li>
+          </ol>
+        </div>
+        <div class="slide-bottom"><span>HVE Core / Sarcasm Agent</span><span>App &#8594; Langfuse</span></div>
+        <aside class="notes">Use about 15 seconds to introduce the demo, then switch to the prepared application and Langfuse tabs. Classify a message, open the matching request trace and inspect an authorized evaluation run if one has been prepared. Use real evidence; if a live run or reviewed evaluation is unavailable, say so. Unknown is abstention, not a provider error.</aside>
+      </section>
+    </main>
+  </div>
+  <nav id="presenter-controls" aria-label="Presentation controls">
+    <div class="brand"><span class="brand-dot" aria-hidden="true"></span> HVE CORE <span id="chapter-label">The story</span></div>
+    <div class="utility-controls">
+      <button type="button" id="overview-button">Slides</button>
+      <button type="button" data-dialog="sources">Sources</button>
+      <button type="button" data-dialog="notes">Notes</button>
+      <button type="button" data-dialog="help">Keys</button>
+      <button type="button" id="motion-button" aria-pressed="false">Motion off</button>
+      <button type="button" id="fullscreen-button" aria-pressed="false">Full screen</button>
+    </div>
+    <div class="slide-controls">
+      <button type="button" id="previous-slide" aria-label="Previous slide">&#8592;</button>
+      <output id="slide-count" aria-label="Current slide"></output>
+      <button type="button" id="next-slide" aria-label="Next slide">&#8594;</button>
+    </div>
+  </nav>
+  <div id="announcement" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <dialog id="detail-dialog" aria-labelledby="dialog-title">
+    <div class="dialog-header"><h2 id="dialog-title"></h2><button type="button" id="close-dialog">Close <kbd>Esc</kbd></button></div>
+    <div id="dialog-content" tabindex="0"></div>
+  </dialog>
+</body>
+</html>

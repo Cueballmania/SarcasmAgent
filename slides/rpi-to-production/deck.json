@@ -1,0 +1,5 @@
+{
+  "title": "From RPI to a Maintained AI App",
+  "description": "HVE Core's RPI loop, our app's quick path to hosted production, and the observability and evaluations that feed the next change.",
+  "sourceNote": "Sources checked 10 November 2026. HVE Core workflow summaries and application implementation are source-backed. Diagrams describe workflows, not performed deployments or measured model quality. The hosted evaluation runner is a recommended next step, not an existing CI job."
+}
